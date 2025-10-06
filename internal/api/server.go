@@ -4,42 +4,60 @@ import (
 	"database/sql"
 	"net/http"
 
+	"github.com/bwburch/inflight-ui-service/internal/auth"
+	"github.com/bwburch/inflight-ui-service/internal/storage/sessions"
 	"github.com/bwburch/inflight-ui-service/internal/storage/templates"
 	"github.com/bwburch/inflight-ui-service/internal/storage/users"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
 type Server struct {
 	echo             *echo.Echo
 	db               *sql.DB
+	redis            *redis.Client
 	templatesHandler *TemplatesHandler
 	usersHandler     *UsersHandler
+	authHandler      *AuthHandler
+	authMiddleware   *auth.Middleware
 	logger           *logrus.Logger
 }
 
-func NewServer(db *sql.DB, logger *logrus.Logger) *Server {
+func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Server {
 	e := echo.New()
 	e.HideBanner = true
+
+	// Disable validator - we'll do manual validation
+	e.Validator = nil
 
 	// Middleware
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
-	// Initialize handlers
+	// Initialize stores
 	templatesStore := templates.NewStore(db)
-	templatesHandler := NewTemplatesHandler(templatesStore)
-
 	usersStore := users.NewStore(db)
+	sessionStore := sessions.NewStore(redisClient)
+
+	// Initialize handlers
+	templatesHandler := NewTemplatesHandler(templatesStore)
 	usersHandler := NewUsersHandler(usersStore)
+	authHandler := NewAuthHandler(usersStore, sessionStore)
+
+	// Initialize auth middleware
+	authMiddleware := auth.NewMiddleware(sessionStore, usersStore)
 
 	s := &Server{
 		echo:             e,
 		db:               db,
+		redis:            redisClient,
 		templatesHandler: templatesHandler,
 		usersHandler:     usersHandler,
+		authHandler:      authHandler,
+		authMiddleware:   authMiddleware,
 		logger:           logger,
 	}
 
@@ -55,16 +73,23 @@ func (s *Server) registerRoutes() {
 	// API v1
 	v1 := s.echo.Group("/api/v1")
 
+	// Auth endpoints (no auth required)
+	auth := v1.Group("/auth")
+	auth.POST("/login", s.authHandler.Login)
+	auth.POST("/logout", s.authHandler.Logout)
+	auth.GET("/me", s.authHandler.Me, s.authMiddleware.RequireAuth)
+
+	// Protected endpoints (auth required)
 	// Templates
-	templates := v1.Group("/templates")
+	templates := v1.Group("/templates", s.authMiddleware.RequireAuth)
 	templates.GET("", s.templatesHandler.ListTemplates)
 	templates.POST("", s.templatesHandler.CreateTemplate)
 	templates.GET("/:id", s.templatesHandler.GetTemplate)
 	templates.PUT("/:id", s.templatesHandler.UpdateTemplate)
 	templates.DELETE("/:id", s.templatesHandler.DeleteTemplate)
 
-	// Users
-	usersGroup := v1.Group("/users")
+	// Users (admin only - for now just require auth)
+	usersGroup := v1.Group("/users", s.authMiddleware.RequireAuth)
 	usersGroup.GET("", s.usersHandler.ListUsers)
 	usersGroup.POST("", s.usersHandler.CreateUser)
 	usersGroup.GET("/:id", s.usersHandler.GetUser)

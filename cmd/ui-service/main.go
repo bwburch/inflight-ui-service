@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
@@ -59,6 +61,22 @@ func main() {
 
 	logger.Info("Database connection established")
 
+	// Connect to Redis
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
+	// Test Redis connection
+	ctx := context.Background()
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		logger.Fatalf("Failed to connect to Redis: %v", err)
+	}
+	defer redisClient.Close()
+
+	logger.Info("Redis connection established")
+
 	// Run migrations if enabled
 	if cfg.Migrations.AutoRun {
 		if err := runMigrations(db, cfg.Migrations.Path, logger); err != nil {
@@ -67,7 +85,7 @@ func main() {
 	}
 
 	// Create and start server
-	server := api.NewServer(db, logger)
+	server := api.NewServer(db, redisClient, logger)
 
 	// Graceful shutdown
 	go func() {

@@ -1,0 +1,97 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: inflight-ui-redis
+    restart: unless-stopped
+
+    # Production-ready settings
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --timeout 300
+      --tcp-keepalive 60
+      --loglevel notice
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      # Persist data to disk
+      - redis_data:/data
+      # Optional: Custom config file
+      # - ./config/redis.conf:/usr/local/etc/redis/redis.conf
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    # Network
+    networks:
+      - inflight-network
+
+  # Optional: Redis Commander (Web UI for development)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: inflight-redis-commander
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"  # Access at http://localhost:8081
+    depends_on:
+      - redis
+    networks:
+      - inflight-network
+    profiles:
+      - dev  # Only start with: docker-compose --profile dev up
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  inflight-network:
+    driver: bridge
+
+# Usage:
+#
+# Start Redis only (production):
+#   docker-compose -f docker-compose.redis.yaml up -d
+#
+# Start Redis + Web UI (development):
+#   docker-compose -f docker-compose.redis.yaml --profile dev up -d
+#
+# Stop:
+#   docker-compose -f docker-compose.redis.yaml down
+#
+# View logs:
+#   docker-compose -f docker-compose.redis.yaml logs -f redis
+#
+# Check health:
+#   docker-compose -f docker-compose.redis.yaml ps
+#
+# Connect via CLI:
+#   docker exec -it inflight-redis redis-cli
+#
+# Flush all sessions (emergency):
+#   docker exec -it inflight-redis redis-cli FLUSHDB

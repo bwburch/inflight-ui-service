@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"net/http"
 	"strconv"
 
@@ -92,8 +93,15 @@ func (h *UsersHandler) CreateUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	if err := c.Validate(&input); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	// Manual validation
+	if input.Username == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "username is required")
+	}
+	if input.Email == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	}
+	if input.Password == "" || len(input.Password) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 8 characters")
 	}
 
 	// Default role to 'user' if not specified
@@ -205,8 +213,9 @@ func (h *UsersHandler) UpdatePassword(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	if err := c.Validate(&input); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	// Manual validation
+	if input.Password == "" || len(input.Password) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 8 characters")
 	}
 
 	if err := h.store.UpdatePassword(c.Request().Context(), id, input.Password); err != nil {

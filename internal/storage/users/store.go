@@ -59,20 +59,23 @@ func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, of
 		WHERE 1=1
 	`
 	countQuery := `SELECT COUNT(*) FROM users WHERE 1=1`
-	args := []interface{}{}
+	queryArgs := []interface{}{}
+	countArgs := []interface{}{}
 	argCount := 1
 
 	if role != "" && role != "all" {
 		query += fmt.Sprintf(" AND role = $%d", argCount)
 		countQuery += fmt.Sprintf(" AND role = $%d", argCount)
-		args = append(args, role)
+		queryArgs = append(queryArgs, role)
+		countArgs = append(countArgs, role)
 		argCount++
 	}
 
 	if isActive != nil {
 		query += fmt.Sprintf(" AND is_active = $%d", argCount)
 		countQuery += fmt.Sprintf(" AND is_active = $%d", argCount)
-		args = append(args, *isActive)
+		queryArgs = append(queryArgs, *isActive)
+		countArgs = append(countArgs, *isActive)
 		argCount++
 	}
 
@@ -80,24 +83,24 @@ func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, of
 
 	if limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", argCount)
-		args = append(args, limit)
+		queryArgs = append(queryArgs, limit)
 		argCount++
 	}
 
 	if offset > 0 {
 		query += fmt.Sprintf(" OFFSET $%d", argCount)
-		args = append(args, offset)
+		queryArgs = append(queryArgs, offset)
 	}
 
-	// Get total count
+	// Get total count (only use count args, not limit/offset)
 	var total int
-	err := s.db.QueryRowContext(ctx, countQuery, args[:argCount-1]...).Scan(&total)
+	err := s.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count users: %w", err)
 	}
 
 	// Get users
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("query users: %w", err)
 	}
@@ -120,7 +123,7 @@ func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, of
 // Get returns a user by ID
 func (s *Store) Get(ctx context.Context, id int) (*User, error) {
 	query := `
-		SELECT id, username, email, full_name, role, is_active, created_at, updated_at, last_login_at
+		SELECT id, username, email, full_name, role, is_active, created_at, updated_at, last_login_at, password_hash
 		FROM users
 		WHERE id = $1
 	`
@@ -128,7 +131,7 @@ func (s *Store) Get(ctx context.Context, id int) (*User, error) {
 	var u User
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
 		&u.ID, &u.Username, &u.Email, &u.FullName, &u.Role, &u.IsActive,
-		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
+		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &u.PasswordHash,
 	)
 
 	if err == sql.ErrNoRows {
@@ -136,6 +139,30 @@ func (s *Store) Get(ctx context.Context, id int) (*User, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get user: %w", err)
+	}
+
+	return &u, nil
+}
+
+// GetByUsername returns a user by username (for login)
+func (s *Store) GetByUsername(ctx context.Context, username string) (*User, error) {
+	query := `
+		SELECT id, username, email, full_name, role, is_active, created_at, updated_at, last_login_at, password_hash
+		FROM users
+		WHERE username = $1
+	`
+
+	var u User
+	err := s.db.QueryRowContext(ctx, query, username).Scan(
+		&u.ID, &u.Username, &u.Email, &u.FullName, &u.Role, &u.IsActive,
+		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &u.PasswordHash,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by username: %w", err)
 	}
 
 	return &u, nil

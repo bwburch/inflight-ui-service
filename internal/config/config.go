@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server     ServerConfig     `yaml:"server"`
 	Database   DatabaseConfig   `yaml:"database"`
+	Redis      RedisConfig      `yaml:"redis"`
 	Logging    LoggingConfig    `yaml:"logging"`
 	Migrations MigrationsConfig `yaml:"migrations"`
 }
@@ -28,6 +29,13 @@ type DatabaseConfig struct {
 	SSLMode            string `yaml:"sslmode"`
 	MaxConnections     int    `yaml:"max_connections"`
 	MaxIdleConnections int    `yaml:"max_idle_connections"`
+}
+
+type RedisConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
 }
 
 type LoggingConfig struct {
@@ -68,8 +76,19 @@ func Load(path string) (*Config, error) {
 	if val := os.Getenv("DB_NAME"); val != "" {
 		cfg.Database.DBName = val
 	}
+	if val := os.Getenv("REDIS_HOST"); val != "" {
+		cfg.Redis.Host = val
+	}
+	if val := os.Getenv("REDIS_PASSWORD"); val != "" {
+		cfg.Redis.Password = val
+	}
 
 	return &cfg, nil
+}
+
+// RedisAddr returns the Redis address
+func (c *RedisConfig) Addr() string {
+	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
 // DSN returns the PostgreSQL connection string
