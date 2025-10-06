@@ -1,0 +1,21 @@
+server:
+  port: 8083
+  host: "0.0.0.0"
+
+database:
+  host: "localhost"
+  port: 5432
+  user: "simulator"
+  password: "simulator"
+  dbname: "ui_service"
+  sslmode: "disable"
+  max_connections: 10
+  max_idle_connections: 5
+
+logging:
+  level: "info"  # debug | info | warn | error
+  format: "json"  # json | text
+
+migrations:
+  auto_run: true
+  path: "migrations"
