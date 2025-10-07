@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/bwburch/inflight-ui-service/internal/auth"
+	"github.com/bwburch/inflight-ui-service/internal/storage/rbac"
 	"github.com/bwburch/inflight-ui-service/internal/storage/sessions"
 	"github.com/bwburch/inflight-ui-service/internal/storage/templates"
 	"github.com/bwburch/inflight-ui-service/internal/storage/users"
@@ -21,6 +22,7 @@ type Server struct {
 	templatesHandler *TemplatesHandler
 	usersHandler     *UsersHandler
 	authHandler      *AuthHandler
+	rbacHandler      *RBACHandler
 	authMiddleware   *auth.Middleware
 	logger           *logrus.Logger
 }
@@ -41,11 +43,15 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 	templatesStore := templates.NewStore(db)
 	usersStore := users.NewStore(db)
 	sessionStore := sessions.NewStore(redisClient)
+	roleStore := rbac.NewRoleStore(db)
+	permissionStore := rbac.NewPermissionStore(db)
+	userRoleStore := rbac.NewUserRoleStore(db)
 
 	// Initialize handlers
 	templatesHandler := NewTemplatesHandler(templatesStore)
 	usersHandler := NewUsersHandler(usersStore)
 	authHandler := NewAuthHandler(usersStore, sessionStore)
+	rbacHandler := NewRBACHandler(roleStore, permissionStore, userRoleStore)
 
 	// Initialize auth middleware
 	authMiddleware := auth.NewMiddleware(sessionStore, usersStore)
@@ -57,6 +63,7 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 		templatesHandler: templatesHandler,
 		usersHandler:     usersHandler,
 		authHandler:      authHandler,
+		rbacHandler:      rbacHandler,
 		authMiddleware:   authMiddleware,
 		logger:           logger,
 	}
@@ -74,10 +81,13 @@ func (s *Server) registerRoutes() {
 	v1 := s.echo.Group("/api/v1")
 
 	// Auth endpoints (no auth required)
-	auth := v1.Group("/auth")
-	auth.POST("/login", s.authHandler.Login)
-	auth.POST("/logout", s.authHandler.Logout)
-	auth.GET("/me", s.authHandler.Me, s.authMiddleware.RequireAuth)
+	authGroup := v1.Group("/auth")
+	authGroup.POST("/login", s.authHandler.Login)
+	authGroup.POST("/logout", s.authHandler.Logout)
+	authGroup.GET("/me", s.authHandler.Me, s.authMiddleware.RequireAuth)
+
+	// RBAC endpoints (auth required)
+	s.rbacHandler.RegisterRoutes(authGroup, s.authMiddleware.RequireAuth)
 
 	// Protected endpoints (auth required)
 	// Templates
