@@ -2,8 +2,9 @@
 -- Description: Removes the is_admin boolean flag and ensures all admin users have the 'admin' role in RBAC
 
 -- Step 1: Ensure all users with is_admin=true have the 'admin' role in user_roles
+-- Use the user's own ID as assigned_by (self-assigned during migration)
 INSERT INTO user_roles (user_id, role_id, assigned_by)
-SELECT u.id, r.id, 1
+SELECT u.id, r.id, u.id
 FROM users u
 CROSS JOIN roles r
 WHERE u.is_admin = true

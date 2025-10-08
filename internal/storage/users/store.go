@@ -15,7 +15,6 @@ type User struct {
 	Username     string     `json:"username"`
 	Email        string     `json:"email"`
 	FullName     string     `json:"full_name"`
-	IsAdmin      bool       `json:"is_admin"`
 	IsActive     bool       `json:"is_active"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    *time.Time `json:"updated_at"`
@@ -54,7 +53,7 @@ func NewStore(db *sql.DB) *Store {
 func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, offset int) ([]User, int, error) {
 	// Build query with filters
 	query := `
-		SELECT id, username, email, full_name, is_admin, is_active, created_at, updated_at, last_login_at
+		SELECT id, username, email, full_name, is_active, created_at, updated_at, last_login_at
 		FROM users
 		WHERE 1=1
 	`
@@ -109,7 +108,7 @@ func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, of
 	var users []User
 	for rows.Next() {
 		var u User
-		err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.IsActive,
+		err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsActive,
 			&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan user: %w", err)
@@ -123,14 +122,14 @@ func (s *Store) List(ctx context.Context, role string, isActive *bool, limit, of
 // Get returns a user by ID
 func (s *Store) Get(ctx context.Context, id int) (*User, error) {
 	query := `
-		SELECT id, username, email, full_name, is_admin, is_active, created_at, updated_at, last_login_at, password_hash
+		SELECT id, username, email, full_name, is_active, created_at, updated_at, last_login_at, password_hash
 		FROM users
 		WHERE id = $1
 	`
 
 	var u User
 	err := s.db.QueryRowContext(ctx, query, id).Scan(
-		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.IsActive,
+		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsActive,
 		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &u.PasswordHash,
 	)
 
@@ -147,14 +146,14 @@ func (s *Store) Get(ctx context.Context, id int) (*User, error) {
 // GetByUsername returns a user by username (for login)
 func (s *Store) GetByUsername(ctx context.Context, username string) (*User, error) {
 	query := `
-		SELECT id, username, email, full_name, is_admin, is_active, created_at, updated_at, last_login_at, password_hash
+		SELECT id, username, email, full_name, is_active, created_at, updated_at, last_login_at, password_hash
 		FROM users
 		WHERE username = $1
 	`
 
 	var u User
 	err := s.db.QueryRowContext(ctx, query, username).Scan(
-		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.IsActive,
+		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsActive,
 		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt, &u.PasswordHash,
 	)
 
@@ -177,15 +176,15 @@ func (s *Store) Create(ctx context.Context, input CreateUserInput) (*User, error
 	}
 
 	query := `
-		INSERT INTO users (username, email, full_name, password_hash, role, is_active, created_at)
-		VALUES ($1, $2, $3, $4, $5, true, NOW())
-		RETURNING id, username, email, full_name, is_admin, is_active, created_at, updated_at, last_login_at
+		INSERT INTO users (username, email, full_name, password_hash, is_active, created_at)
+		VALUES ($1, $2, $3, $4, true, NOW())
+		RETURNING id, username, email, full_name, is_active, created_at, updated_at, last_login_at
 	`
 
 	var u User
 	err = s.db.QueryRowContext(ctx, query,
-		input.Username, input.Email, input.FullName, string(passwordHash), input.Role,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.IsActive,
+		input.Username, input.Email, input.FullName, string(passwordHash),
+	).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsActive,
 		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt)
 
 	if err != nil {
@@ -222,12 +221,12 @@ func (s *Store) Update(ctx context.Context, id int, input UpdateUserInput) (*Use
 		argCount++
 	}
 
-	query += fmt.Sprintf(" WHERE id = $%d RETURNING id, username, email, full_name, is_admin, is_active, created_at, updated_at, last_login_at", argCount)
+	query += fmt.Sprintf(" WHERE id = $%d RETURNING id, username, email, full_name, is_active, created_at, updated_at, last_login_at", argCount)
 	args = append(args, id)
 
 	var u User
 	err := s.db.QueryRowContext(ctx, query, args...).Scan(
-		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.IsActive,
+		&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsActive,
 		&u.CreatedAt, &u.UpdatedAt, &u.LastLoginAt,
 	)
 

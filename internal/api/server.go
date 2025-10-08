@@ -1,14 +1,18 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 
 	"github.com/bwburch/inflight-ui-service/internal/auth"
+	"github.com/bwburch/inflight-ui-service/internal/storage/metrics"
 	"github.com/bwburch/inflight-ui-service/internal/storage/rbac"
 	"github.com/bwburch/inflight-ui-service/internal/storage/sessions"
+	"github.com/bwburch/inflight-ui-service/internal/storage/simulations"
 	"github.com/bwburch/inflight-ui-service/internal/storage/templates"
 	"github.com/bwburch/inflight-ui-service/internal/storage/users"
+	"github.com/bwburch/inflight-ui-service/internal/worker"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
@@ -16,15 +20,19 @@ import (
 )
 
 type Server struct {
-	echo             *echo.Echo
-	db               *sql.DB
-	redis            *redis.Client
-	templatesHandler *TemplatesHandler
-	usersHandler     *UsersHandler
-	authHandler      *AuthHandler
-	rbacHandler      *RBACHandler
-	authMiddleware   *auth.Middleware
-	logger           *logrus.Logger
+	echo                   *echo.Echo
+	db                     *sql.DB
+	redis                  *redis.Client
+	templatesHandler       *TemplatesHandler
+	usersHandler           *UsersHandler
+	authHandler            *AuthHandler
+	rbacHandler            *RBACHandler
+	simulationQueueHandler *SimulationQueueHandler
+	metricsProfilesHandler *MetricsProfilesHandler
+	attachmentsHandler     *AttachmentsHandler
+	authMiddleware         *auth.Middleware
+	simulationWorker       *worker.SimulationWorker
+	logger                 *logrus.Logger
 }
 
 func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Server {
@@ -46,26 +54,61 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 	roleStore := rbac.NewRoleStore(db)
 	permissionStore := rbac.NewPermissionStore(db)
 	userRoleStore := rbac.NewUserRoleStore(db)
+	jobQueueStore := simulations.NewJobQueueStore(db)
+	metricProfileStore := metrics.NewMetricProfileStore(db)
+
+	// Initialize S3 attachment store with MinIO configuration
+	// TODO: Move to config file
+	minioEndpoint := "localhost:9010"         // MinIO API port
+	minioAccessKey := "admin"                 // MinIO root user
+	minioSecretKey := "admin_password"        // MinIO root password
+	minioBucket := "inflight-simulations"     // Bucket name
+	minioUseSSL := false                      // Local development = no SSL
+
+	attachmentStore, err := simulations.NewS3AttachmentStore(
+		db,
+		minioEndpoint,
+		minioAccessKey,
+		minioSecretKey,
+		minioBucket,
+		minioUseSSL,
+	)
+	if err != nil {
+		logger.Fatalf("Failed to initialize S3 attachment store: %v", err)
+	}
+
+	logger.Info("S3 attachment store initialized with MinIO backend")
 
 	// Initialize handlers
 	templatesHandler := NewTemplatesHandler(templatesStore)
 	usersHandler := NewUsersHandler(usersStore)
 	authHandler := NewAuthHandler(usersStore, sessionStore)
 	rbacHandler := NewRBACHandler(roleStore, permissionStore, userRoleStore)
+	simulationQueueHandler := NewSimulationQueueHandler(jobQueueStore)
+	metricsProfilesHandler := NewMetricsProfilesHandler(metricProfileStore)
+	attachmentsHandler := NewAttachmentsHandler(attachmentStore, jobQueueStore)
 
 	// Initialize auth middleware
 	authMiddleware := auth.NewMiddleware(sessionStore, usersStore)
 
+	// Initialize simulation worker
+	advisorURL := "http://localhost:8082" // TODO: Make configurable
+	simulationWorker := worker.NewSimulationWorker(jobQueueStore, advisorURL, logger)
+
 	s := &Server{
-		echo:             e,
-		db:               db,
-		redis:            redisClient,
-		templatesHandler: templatesHandler,
-		usersHandler:     usersHandler,
-		authHandler:      authHandler,
-		rbacHandler:      rbacHandler,
-		authMiddleware:   authMiddleware,
-		logger:           logger,
+		echo:                   e,
+		db:                     db,
+		redis:                  redisClient,
+		templatesHandler:       templatesHandler,
+		usersHandler:           usersHandler,
+		authHandler:            authHandler,
+		rbacHandler:            rbacHandler,
+		simulationQueueHandler: simulationQueueHandler,
+		metricsProfilesHandler: metricsProfilesHandler,
+		attachmentsHandler:     attachmentsHandler,
+		authMiddleware:         authMiddleware,
+		simulationWorker:       simulationWorker,
+		logger:                 logger,
 	}
 
 	s.registerRoutes()
@@ -88,6 +131,16 @@ func (s *Server) registerRoutes() {
 
 	// RBAC endpoints (auth required)
 	s.rbacHandler.RegisterRoutes(authGroup, s.authMiddleware.RequireAuth)
+
+	// Simulation queue endpoints (auth required)
+	simulations := v1.Group("/simulations")
+	s.simulationQueueHandler.RegisterRoutes(simulations, s.authMiddleware.RequireAuth)
+
+	// Metrics profiles endpoints (auth required)
+	s.metricsProfilesHandler.RegisterRoutes(v1, s.authMiddleware.RequireAuth)
+
+	// Attachments endpoints (auth required)
+	s.attachmentsHandler.RegisterRoutes(simulations, s.authMiddleware.RequireAuth)
 
 	// Protected endpoints (auth required)
 	// Templates
@@ -129,10 +182,15 @@ func (s *Server) handleReady(c echo.Context) error {
 }
 
 func (s *Server) Start(address string) error {
-	s.logger.Infof("Starting UI service on %s", address)
+	// Start simulation worker in background
+	go s.simulationWorker.Start(context.Background())
+
+	s.logger.Infof("Starting UI service on %s (with simulation queue worker)", address)
 	return s.echo.Start(address)
 }
 
 func (s *Server) Shutdown() error {
-	return s.echo.Shutdown(nil)
+	s.logger.Info("Shutting down server...")
+	s.simulationWorker.Stop()
+	return s.echo.Shutdown(context.Background())
 }

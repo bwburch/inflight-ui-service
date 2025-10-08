@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/bwburch/inflight-ui-service/internal/storage/templates"
+	"github.com/bwburch/inflight-ui-service/internal/storage/users"
 	"github.com/labstack/echo/v4"
 )
 
@@ -60,7 +61,11 @@ func (h *TemplatesHandler) GetTemplate(c echo.Context) error {
 
 // CreateTemplate creates a new template
 func (h *TemplatesHandler) CreateTemplate(c echo.Context) error {
-	userID := 1 // Placeholder
+	// Get user from context (set by auth middleware)
+	user, ok := c.Get("user").(*users.User)
+	if !ok || user == nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "user not authenticated")
+	}
 
 	var req struct {
 		Name         string          `json:"name"`
@@ -82,7 +87,7 @@ func (h *TemplatesHandler) CreateTemplate(c echo.Context) error {
 	}
 
 	template, err := h.store.Create(c.Request().Context(), templates.CreateTemplateInput{
-		UserID:       userID,
+		UserID:       user.ID,
 		Name:         req.Name,
 		Description:  req.Description,
 		ConfigurationData: req.ConfigurationData,
