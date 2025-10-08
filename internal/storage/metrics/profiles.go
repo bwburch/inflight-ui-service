@@ -379,3 +379,75 @@ func (s *MetricProfileStore) GetTemplates(ctx context.Context) ([]MetricProfileT
 
 	return templates, nil
 }
+
+// CreateTemplate creates a new profile template
+func (s *MetricProfileStore) CreateTemplate(ctx context.Context, name, profileType, description string, requiredMetrics, optionalMetrics []string) (*MetricProfileTemplate, error) {
+	query := `
+		INSERT INTO metric_profile_templates (name, profile_type, description, required_metrics, optional_metrics)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, name, profile_type, description, required_metrics, optional_metrics, created_at
+	`
+
+	var template MetricProfileTemplate
+	err := s.db.QueryRowContext(ctx, query,
+		name, profileType, description,
+		pq.Array(requiredMetrics), pq.Array(optionalMetrics),
+	).Scan(
+		&template.ID, &template.Name, &template.ProfileType, &template.Description,
+		pq.Array(&template.RequiredMetrics), pq.Array(&template.OptionalMetrics),
+		&template.CreatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("create template: %w", err)
+	}
+
+	return &template, nil
+}
+
+// UpdateTemplate updates an existing profile template
+func (s *MetricProfileStore) UpdateTemplate(ctx context.Context, id, name, description string, requiredMetrics, optionalMetrics []string) (*MetricProfileTemplate, error) {
+	query := `
+		UPDATE metric_profile_templates
+		SET name = $2, description = $3, required_metrics = $4, optional_metrics = $5
+		WHERE id = $1
+		RETURNING id, name, profile_type, description, required_metrics, optional_metrics, created_at
+	`
+
+	var template MetricProfileTemplate
+	err := s.db.QueryRowContext(ctx, query,
+		id, name, description,
+		pq.Array(requiredMetrics), pq.Array(optionalMetrics),
+	).Scan(
+		&template.ID, &template.Name, &template.ProfileType, &template.Description,
+		pq.Array(&template.RequiredMetrics), pq.Array(&template.OptionalMetrics),
+		&template.CreatedAt,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("update template: %w", err)
+	}
+
+	return &template, nil
+}
+
+// DeleteTemplate deletes a profile template
+func (s *MetricProfileStore) DeleteTemplate(ctx context.Context, id string) error {
+	query := `DELETE FROM metric_profile_templates WHERE id = $1`
+
+	result, err := s.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("delete template: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("template not found")
+	}
+
+	return nil
+}

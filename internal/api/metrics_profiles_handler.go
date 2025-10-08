@@ -250,6 +250,79 @@ func (h *MetricsProfilesHandler) GetProfileTemplates(c echo.Context) error {
 	})
 }
 
+// CreateProfileTemplate creates a new profile template
+// POST /api/v1/metrics/templates
+func (h *MetricsProfilesHandler) CreateProfileTemplate(c echo.Context) error {
+	ctx := c.Request().Context()
+
+	var req struct {
+		Name            string   `json:"name"`
+		ProfileType     string   `json:"profile_type"`
+		Description     string   `json:"description"`
+		RequiredMetrics []string `json:"required_metrics"`
+		OptionalMetrics []string `json:"optional_metrics"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	if req.Name == "" || req.ProfileType == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name and profile_type are required")
+	}
+
+	template, err := h.profileStore.CreateTemplate(ctx, req.Name, req.ProfileType, req.Description, req.RequiredMetrics, req.OptionalMetrics)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create template")
+	}
+
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"template": template,
+	})
+}
+
+// UpdateProfileTemplate updates an existing profile template
+// PUT /api/v1/metrics/templates/:id
+func (h *MetricsProfilesHandler) UpdateProfileTemplate(c echo.Context) error {
+	ctx := c.Request().Context()
+	id := c.Param("id")
+
+	var req struct {
+		Name            string   `json:"name"`
+		Description     string   `json:"description"`
+		RequiredMetrics []string `json:"required_metrics"`
+		OptionalMetrics []string `json:"optional_metrics"`
+	}
+
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+	}
+
+	template, err := h.profileStore.UpdateTemplate(ctx, id, req.Name, req.Description, req.RequiredMetrics, req.OptionalMetrics)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update template")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"template": template,
+	})
+}
+
+// DeleteProfileTemplate deletes a profile template
+// DELETE /api/v1/metrics/templates/:id
+func (h *MetricsProfilesHandler) DeleteProfileTemplate(c echo.Context) error {
+	ctx := c.Request().Context()
+	id := c.Param("id")
+
+	if err := h.profileStore.DeleteTemplate(ctx, id); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete template")
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "template deleted",
+	})
+}
+
 // RegisterRoutes registers all metrics profile routes
 func (h *MetricsProfilesHandler) RegisterRoutes(e *echo.Group, authMiddleware echo.MiddlewareFunc) {
 	// Service-specific routes
@@ -263,4 +336,7 @@ func (h *MetricsProfilesHandler) RegisterRoutes(e *echo.Group, authMiddleware ec
 
 	// Global routes
 	e.GET("/metrics/templates", h.GetProfileTemplates, authMiddleware)
+	e.POST("/metrics/templates", h.CreateProfileTemplate, authMiddleware)
+	e.PUT("/metrics/templates/:id", h.UpdateProfileTemplate, authMiddleware)
+	e.DELETE("/metrics/templates/:id", h.DeleteProfileTemplate, authMiddleware)
 }
