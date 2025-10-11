@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/bwburch/inflight-ui-service/internal/auth"
+	"github.com/bwburch/inflight-ui-service/internal/storage/categories"
 	"github.com/bwburch/inflight-ui-service/internal/storage/metrics"
+	"github.com/bwburch/inflight-ui-service/internal/storage/profiles"
 	"github.com/bwburch/inflight-ui-service/internal/storage/rbac"
 	"github.com/bwburch/inflight-ui-service/internal/storage/sessions"
 	"github.com/bwburch/inflight-ui-service/internal/storage/simulations"
@@ -30,6 +32,8 @@ type Server struct {
 	simulationQueueHandler *SimulationQueueHandler
 	metricsProfilesHandler *MetricsProfilesHandler
 	attachmentsHandler     *AttachmentsHandler
+	categoriesHandler      *CategoriesHandler
+	profilesHandler        *ProfilesHandler
 	authMiddleware         *auth.Middleware
 	simulationWorker       *worker.SimulationWorker
 	logger                 *logrus.Logger
@@ -56,6 +60,8 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 	userRoleStore := rbac.NewUserRoleStore(db)
 	jobQueueStore := simulations.NewJobQueueStore(db)
 	metricProfileStore := metrics.NewMetricProfileStore(db)
+	categoriesStore := categories.NewStore(db)
+	profilesStore := profiles.NewStore(db)
 
 	// Initialize S3 attachment store with MinIO configuration
 	// TODO: Move to config file
@@ -87,6 +93,8 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 	simulationQueueHandler := NewSimulationQueueHandler(jobQueueStore)
 	metricsProfilesHandler := NewMetricsProfilesHandler(metricProfileStore)
 	attachmentsHandler := NewAttachmentsHandler(attachmentStore, jobQueueStore)
+	categoriesHandler := NewCategoriesHandler(categoriesStore)
+	profilesHandler := NewProfilesHandler(profilesStore)
 
 	// Initialize auth middleware
 	authMiddleware := auth.NewMiddleware(sessionStore, usersStore)
@@ -106,6 +114,8 @@ func NewServer(db *sql.DB, redisClient *redis.Client, logger *logrus.Logger) *Se
 		simulationQueueHandler: simulationQueueHandler,
 		metricsProfilesHandler: metricsProfilesHandler,
 		attachmentsHandler:     attachmentsHandler,
+		categoriesHandler:      categoriesHandler,
+		profilesHandler:        profilesHandler,
 		authMiddleware:         authMiddleware,
 		simulationWorker:       simulationWorker,
 		logger:                 logger,
@@ -141,6 +151,11 @@ func (s *Server) registerRoutes() {
 
 	// Attachments endpoints (auth required)
 	s.attachmentsHandler.RegisterRoutes(simulations, s.authMiddleware.RequireAuth)
+
+	// Configuration endpoints
+	configGroup := v1.Group("/configuration")
+	s.categoriesHandler.RegisterRoutes(configGroup, s.authMiddleware.RequireAuth)  // Auth required for write operations
+	s.profilesHandler.RegisterRoutes(configGroup, s.authMiddleware.RequireAuth)    // Auth required for write operations
 
 	// Protected endpoints (auth required)
 	// Templates
